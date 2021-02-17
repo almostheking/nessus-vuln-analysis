@@ -81,6 +81,7 @@ def _Parse_Nessus(report_path):
                     if ReportItem.tag == "HostProperties":
                         for tagg in ReportItem:
                             if tagg.attrib['name'] in host_params:
+                                #if tagg.attrib['name'] == "mac-address" and "virtual-mac-address" in tagg.attrib.values(): WORKING ON MAC SORTING WHEN THERE'S MORE THAN ONE
                                 props_dict[tagg.attrib['name']] = tagg.text
                     else:
                         for attr in ReportItem.attrib:
