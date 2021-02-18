@@ -64,16 +64,22 @@ def _Parse_Nessus(report_path):
                    "synopsis",
                    "solution",
                    "plugin_output"]
+    cred_fail_plugins = ["117886",
+                         "21745",
+                         "110385"]
 
+    # Open and read the XML report data into the program
     f = open(report_path, 'r')
     xml_content = f.read()
     f.close()
 
-    parz = etree.XMLParser(huge_tree=True)
-    root = etree.fromstring(text=xml_content, parser=parz)
+    parz = etree.XMLParser(huge_tree=True) # initialize the parser object
+    root = etree.fromstring(text=xml_content, parser=parz) # parse the XML content
+
+    # Iterate over the parsed XML object and generate a dictionary that contains useful values.
     for block in root:
       if block.tag == "Report":
-          client = block.attrib['name'].split(" ", 1)[0] # Grabs the client acronym from the scan name
+          client = block.attrib['name'].split(" ", 1)[0] # grabs the client acronym from the scan name
           for ReportHost in block:
               props_dict = dict() # dict for holding host properties
               vulns_dict = dict() # dict for holding individual vulnerability dicts
@@ -99,8 +105,20 @@ def _Parse_Nessus(report_path):
                       vulns_dict[ReportItem.attrib['pluginID']] = vuln_dict
                   props_dict['vulns'] = vulns_dict
               report_dict[ReportHost.attrib['name']] = props_dict
-      return report_dict, client
 
+      # Determine credentialed scan status of each host and create a dictionary key for each
+      for host in report_dict:
+          fail_count = 0
+          for prop in report_dict[host]:
+              if prop == "vulns":
+                  for plugin in report_dict[host][prop]:
+                      if plugin in fails:
+                          fail_count+=1
+          if fail_count == 0:
+              report_dict[host]["auth"] = 's'
+          else:
+              report_dict[host]["auth"] = 'f'
+    return report_dict, client
 
 def main ():
     report_path = _Inp_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
