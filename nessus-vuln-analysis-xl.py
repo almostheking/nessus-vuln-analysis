@@ -1,9 +1,44 @@
+import datetime # used for formatting dates for conditionals and displaying
+from openpyxl import Workbook, load_workbook # used for core spreadsheet object initialization
+from openpyxl.styles import NamedStyle, Border, Side, Alignment, Protection, PatternFill, Color, Font, colors # used for defining spreadsheet cell styles
+from openpyxl.worksheet.datavalidation import DataValidation # used for adding data validation to excel cells
 from lxml import etree # used for parsing .nessus files
 import datetime # used for formatting scan date and accurately comparing datetime values
 import os # used for file pathing and file backups
+import pandas as pd # used for compiling and comparing vulnerabiltiy data sets
+
+# Global constants for the date and spreadsheet formatting options
+DATE = datetime.datetime.today()
+border = Border(left=Side(border_style='thin'), # basic black cell border
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin'))
+gray_border = Border(left=Side(border_style='double'), # mirrors excel's "Check Cell" built-in style border
+                     right=Side(style='double'),
+                     top=Side(style='double'),
+                     bottom=Side(style='double'))
+my_bad = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid') # cell style config that mirrors excel "Bad" built-in
+bad_font = Font(color='9C0006')
+my_neutral = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid') # cell style config that mirrors excel "Neutral" built-in
+neutral_font = Font(color='9C5700')
+my_good = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid') # cell style config that mirrors excel "Good" built-in
+good_font = Font(color='006100')
+my_check = PatternFill(start_color='A5A5A5', end_color='A5A5A5', fill_type='solid') # cell style config that mirrors excel "Check Cell" built-in
+check_font = Font(color='FFFFFF', bold=True)
+data_val = DataValidation(type="list", formula1='=statuses!$A$2:$A$22', allow_blank=True) # data validation object for limiitng status column values
+vuln_name_style = NamedStyle(name="vuln_name_style") # global text alignment and wrapping style specs
+vuln_name_style.alignment = Alignment(horizontal='left',
+                                      vertical='center',
+                                      wrapText=True)
+the_rest_style = NamedStyle(name="the_rest_style")
+the_rest_style.alignment = Alignment(horizontal='center',
+                                     vertical='center',
+                                     wrapText=True)
+vuln_name_style.border = border # applies the thin black border to all custom cell styles
+the_rest_style.border = border
 
 # Takes string instructions and a flag for whether or not an extension is expected and exits if too many failed attempts occur or some other issue occurs
-def _Inp_Path (instruct, opt):
+def _Input_Path (instruct, opt):
     count = 0 # counts errors
     while True:
         try:
@@ -48,12 +83,35 @@ def _Inp_Path (instruct, opt):
                 continue
     return p
 
+# Asks for string input sheet name and checks to see if it's valid within the context of a valid vuln mgmt workbook
+def _Input_Sheet (instruct, wb):
+    count = 0
+    while True:
+        sheet = input(instruct+': ')
+        if count == 3:
+            _Err_Exit('\nYou seem to be having trouble. Confirm your desired sheet\'s name and come back later.\nExiting...')
+        elif sheet != 'statuses' and sheet != 'columns' and sheet != 'targets':
+            try:
+                ws = wb[sheet]
+                break
+            except:
+                count+=1
+                print("Error in initializing worksheet object. Try again...")
+                continue
+        else:
+            count+=1
+            print('\nSheetname cannot be modified. Try again...\n')
+            continue
+    return sheet
+
+# Give me a dict and a client acronym...
 def _Parse_Nessus(report_path):
     client = ""
     report_dict = dict()
     host_params = ["HOST_START",
                    "mac-address",
                    "netbios-name",
+                   "host-rdns",
                    "operating-system",
                    "host-ip"]
     vuln_params = ["pluginName",
@@ -118,8 +176,246 @@ def _Parse_Nessus(report_path):
               report_dict[host]["auth"] = 's'
           else:
               report_dict[host]["auth"] = 'f'
+
     return report_dict, client
 
+# Setting column styles is needed several times throughout the program's functions
+def _Set_Col_Styles (ws):
+    for cell in ws['A']:
+        cell.style = 'vuln_name_style'
+    for column in ws['B:V']:
+        for cell in column:
+            cell.style = 'the_rest_style'
+    return ws
+
+# Setting column dimensions is needed several times throughout the program's functions
+def _Set_Col_Widths (ws):
+    ws.column_dimensions['A'].width = 40
+    ws.column_dimensions['B'].width = 12
+    ws.column_dimensions['C'].width = 14
+    ws.column_dimensions['D'].width = 18
+    ws.column_dimensions['E'].width = 18
+    ws.column_dimensions['F'].width = 18
+    ws.column_dimensions['G'].width = 20
+    ws.column_dimensions['H'].width = 25
+    ws.column_dimensions['I'].width = 14
+    ws.column_dimensions['J'].width = 8
+    ws.column_dimensions['K'].width = 8
+    ws.column_dimensions['L'].width = 30
+    ws.column_dimensions['M'].width = 30
+    ws.column_dimensions['N'].width = 18
+    ws.column_dimensions['O'].width = 20
+    ws.column_dimensions['P'].width = 25
+    ws.column_dimensions['Q'].width = 22
+    ws.column_dimensions['R'].width = 18
+    ws.column_dimensions['S'].width = 18
+    ws.column_dimensions['T'].width = 18
+    ws.column_dimensions['U'].width = 18
+    ws.column_dimensions['V'].width = 18
+    return ws
+
+def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
+    statuses_data = {'Status':['Pending Analysis', 'Pending Ticket Creation', # define the data that goes into the default reference sheets
+                                'Pending Patch Cycle', 'Pending Remediation', 'Pending Reevaluation',
+                                'Risk Ack. Needed', 'False Positive Doc. Needed',
+                                'On Hold', 'Closed',
+                                'Remediated - Jan', 'Remediated - Feb',
+                                'Remediated - Mar', 'Remediated - Apr',
+                                'Remediated - May', 'Remediated - Jun',
+                                'Remediated - Jul', 'Remediated - Aug',
+                                'Remediated - Sep', 'Remediated - Oct',
+                                'Remediated - Nov', 'Remediated - Dec'],
+                                'Explanation':["The vulnerability has yet to be analyzed by a security analyst",
+                                                "The vulnerability has been analyzed by a security analyst, but the assigned analyst has not yet created a ticket for it.",
+                                                "The vulnerability is very recent and references one or several critical or important OS patches. This status is used when the analyst determines that the vulnerability does not pose an immediate threat and has no reason to believe the patching procedure will not handle the vulnerability according to its schedule.",
+                                                "The vulnerability has been analyzed and a ticket has been created/assigned outlining remediation steps.",
+                                                "The vulnerability entry has been modified or marked wrongly in some way, or an oddity in the scan data warrants manual examination. This could be due to a vulnerability's status being marked as \"Remediated\" even though it continues to be detected in scans. Whenever this status is seen, refer to the vulnerability's \"Mitigation Notes\" or \"Robot Notes\" columns for more information.",
+                                                "The vulnerability entry has been confirmed to represent a true positive, however certain factors dictate that the vulnerability cannot or will not be remediated and the risk will be accepted instead. This decision usually comes from the Leadership Team or the Head of the Security Department. Every risk acknowledgment needs to be documented according to a template/standard.",
+                                                "The vulnerability has been confirmed to represent a false positive. This is usually accompanied by a modified scanner configuration, listing the false positive vulnerability as a lower default risk level to prevent it from appearing as High or Critical. Every false positive needs to be documented according to a template/standard.",
+                                                "This status ought not be used frequently. It is a catch-all status for any vulnerability entry that does not meet any of the other status conditions and must be picked back up in the future.",
+                                                "This status ought not be used frequently. It is a catch-all status for any vulnerability entry that does not meet any of the other status conditions and does not need to be handled, modified, analyzed, remediated, or otherwise worried about.",
+                                                "This status and all other month-based remediation statuses signify the vulnerability has been handled and will not be seen again on the device in question. Having separate remediation statuses for every month allows for the use of macros to generate remediation reports for any given month out of the year.", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\""]}
+    columns_data = {'Column':['Vulnerability Name',
+                              'Plugin ID',
+                              'Device Name',
+                              'MAC(s)',
+                              'IP',
+                              'OS',
+                              'Port',
+                              'Service',
+                              'Synopsis',
+                              'Output',
+                              'Last Scanned',
+                              'Analysis Date',
+                              'Analyst',
+                              'Severity',
+                              'Risk',
+                              'Solution',
+                              'Notes',
+                              'Ticket #',
+                              'Status',
+                              'Vulnerability Details',
+                              'Scanner Config?',
+                              'Robot Note'],
+                                'Explanation':["The name of the vulnerability as it is reported by the scan source.",
+                                "The scanner plugin that detected the vulnerability.",
+                                "The DNS name or NetBIOS name of the target host - this is not a fixed or globally unique identifier!",
+                                "The device's MAC address; contains multiple addresses if the scanner detects multiple network interfaces. If a MAC is not detected, '???' will be listed. This severely limits the Python tool's ability to examine vulnerability entries.",
+                                "The IP address of the host detected at the time of the scan - this is liable to change according to DHCP whims.",
+                                "The detected OS; this is most likely not accurate. Don't rely on it.",
+                                "The port that the vulnerability was detected on.",
+                                "The service name using the port in question. Determination of the name happens on the scanner's side, not the target's side.",
+                                "The basic description of the vulnerability provided by the scanner's plugin description.",
+                                "The plugin output that shows you why the plugin picked up the vulnerability on the target host; this is important information for determining the remediation steps required.",
+                                "The last time this device was seen in a scan report (does not consider authentication success though)",
+                                "The date on which the assigned security analyst performed analysis on the vulnerability",
+                                "The security analyst who performed the initial analysis on the vulnerability",
+                                "The scanner's reported severity rating for the vulnerability in question; 4 is critical. 3 is High.",
+                                "The risk level assigned by the security analyst; this ranking, of critical, high, medium, low, or N/A, signifies the practical threat level - not the abstract default threat level given by Nessus; this ranking informs the remediation prioritization schedule",
+                                "The default solution provided by the scanner plugin.",
+                                "The security analysts notes on the vulnerability; this could be notes on tracking the vulnerability, more insight into why it was detected, or more details about how to remediate it.",
+                                "The ticket number of the ticket created to handle the remediation of the vulnerability",
+                                "Describes the stage in which the vulnerability is within the analysis/remediation cycle",
+                                "A link to the scanner plugin details; usually a link to an external resource.",
+                                "Indicates whether the vulnerability prompted a reconfiguration of the scanner's default plugin threat rankings; provides detail on what the change entails if a change has taken place",
+                                "Any notes left by the vuln_analysis.py script for the given vulnerability"]}
+
+    statuses_df = pd.DataFrame(statuses_data) # create the not-yet-formatted dataframes that hold the above data dictionaries
+    columns_df = pd.DataFrame(columns_data)
+
+    writer = pd.ExcelWriter(filepath+"\\"+filename+".xlsx", engine='xlsxwriter') # initialize the new spreadsheet writer object and a workbook object to work with
+    workbook = writer.book
+
+    pgraph = workbook.add_format({'text_wrap': True, # define various cell styles and formats compatible with the xlsxwriter writer object
+                                    'align': 'left',
+                                    'valign': 'top'})
+    stat = workbook.add_format({'text_wrap': True,
+                                'align': 'left',
+                                'valign': 'vcenter'})
+    red = workbook.add_format({'bg_color': '#FFC7CE',
+                                'font_color': '#9C0006',
+                                'align': 'center',
+                                'valign': 'vcenter',
+                                'border': True,
+                                'border_color': 'black'})
+    yellow = workbook.add_format({'bg_color': '#FFEB9C',
+                                'font_color': '#9C5700',
+                                'align': 'left',
+                                'valign': 'vcenter',
+                                'border': True,
+                                'border_color': 'black'})
+    gray = workbook.add_format({'bg_color': '#A5A5A5',
+                                'font_color': 'white',
+                                'bold': True,
+                                'align': 'left',
+                                'valign': 'vcenter',
+                                'border': 6,
+                                'border_color': 'black'})
+    green = workbook.add_format({'bg_color': '#C6EFCE',
+                                'font_color': '#006100',
+                                'align': 'left',
+                                'valign': 'vcenter',
+                                'border': True,
+                                'border_color': 'black'})
+
+    for s in sheetnames: # iterate over the sheetnames you provided previously
+        worksheet_df = pd.DataFrame(columns=columns_df['Column']) # create temp dataframe using column names according to those listed in the 'columns' sheet
+        worksheet_df.to_excel(writer, s, index=False) # transfer temp dataframe to the spreadsheet object as a new sheet
+        ws = writer.sheets[s] # define a new temp sheet object in order to freeze the first row column names and set formats
+        ws.freeze_panes(1, 0)
+
+    statuses_df.to_excel(writer, 'statuses', index=False) # transfer default sheet dataframes to the spreadsheet object as new sheets
+    columns_df.to_excel(writer, 'columns', index=False)
+
+    statuses_sheet = writer.sheets['statuses'] # initialize worksheet objects out of the previously transferred dataframe sheets in order to apply formatting to them
+    columns_sheet = writer.sheets['columns']
+
+    statuses_sheet.set_column(1, 1, 120, pgraph) # format the sheets with appropriate cell widths and styles previously defined
+    statuses_sheet.set_column(0, 0, 27, stat)
+    columns_sheet.set_column(1, 1, 120, pgraph)
+    columns_sheet.set_column(0, 0, 27, stat)
+    statuses_sheet.conditional_format('A2:A3', {'type': 'no_errors', 'format': red})
+    statuses_sheet.conditional_format('A4:A5', {'type': 'no_errors', 'format': yellow})
+    statuses_sheet.conditional_format('A6', {'type': 'no_errors', 'format': red})
+    statuses_sheet.conditional_format('A7:A8', {'type': 'no_errors', 'format': gray})
+    statuses_sheet.conditional_format('A9', {'type': 'no_errors', 'format': yellow})
+    statuses_sheet.conditional_format('A10:A22', {'type': 'no_errors', 'format': green})
+
+    writer.save() # save the spreadsheet object and close it
+    writer.close()
+
+    wb = load_workbook(filepath+"\\"+filename+".xlsx", read_only=False) # initialize a new workbook object so we can modify the now-existing xlsx file
+
+    wb.add_named_style(vuln_name_style) # add the previously defined styles to the workbook object so they can be used; this should stick between saves
+    wb.add_named_style(the_rest_style)
+
+    for sheet in wb.sheetnames: # iterate over sheetnames as they occur in the spreadsheet previously created and saved
+        if sheet in sheetnames: # check if the current sheet is one of the analysis sheets
+            ws1 = wb[sheet] # initialize a worksheet object to apply styles and widths
+            ws1.add_data_validation(data_val) # applies data validation to the statuses column so that the program's modification logic doesn't hit any snags
+            data_val.add('O2:O1048576')
+            ws1 = _Set_Col_Styles(ws1) # iterate over cells in specified columns and apply styles
+            ws1 = _Set_Col_Widths(ws1) # set custom column widths
+
+    wb.save(filepath+"\\"+filename+".xlsx") # finally save and close the fresh worksheet, ready to be fed into the program
+    wb.close()
+
 def main ():
-    report_path = _Inp_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
-    report_dict = _Parse_Nessus(report_path) # parse .nessus file for report dicts, sheet (client) name, and scan date
+    print("----------MENU----------")
+    print("1. Create fresh spreadsheet")
+    print("2. Feed new reports")
+    print("3. Add a new sheet to existing spreadsheet")
+    print("4. Generate a Remediation Report")
+    print("5. Transition to new workbook")
+    print("6. Exit")
+    option = int(input("Enter a number option: "))
+
+    if option == 1:
+        filename = input("Enter a filename (no ext.) for your new workbook: ")
+        filepath = input("Enter an output path for your new workbook: ")
+        sheetnames = input("Enter a comma-separated list (no spaces) of sheet names to create: ").split(',')
+        _Gen_Fresh_Workbook(filename, filepath, sheetnames)
+    if option == 2:
+        report_path = _Input_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
+        report_dict, client = _Parse_Nessus(report_path) # parse .nessus file for report dict and sheet (client) name
+        existing_spreadsheet = _Input_Path("Enter a path to your existing analysis spreadsheet", 'x')
+
+        wb = load_workbook(existing_spreadsheet, read_only=False)
+        target_sheet = _Input_Sheet("Enter the name of the worksheet to load the results into", wb)
+        ws = wb[target_sheet]
+        data = ws.values # for defining dataframe contents
+        columns = next(data)[0:] # for defining dataframe column names
+
+        print("Initializing and preparing vulnerability dataframes...\n")
+        vuln_analysis_df = pd.DataFrame(data, columns=columns)
+        vuln_analysis_df.dropna(axis=0, how='all', inplace=True) # drop null rows and clear the index away totally
+        report_df = pd.DataFrame().reindex_like(vuln_analysis_df) # create an empty duplicate of spreadsheet df for working with the Nessus reports
+
+        print("Building report dataframe...")
+        row = 0
+        for target in report_dict:
+            for v in report_dict[target]['vulns']:
+                if v['severity'] == ('3' or '4' or '5'):
+                    report_df.loc[row, 'Vulnerability Name'] = v['pluginName']
+                    report_df.loc[row, 'Plugin ID'] = v['pluginID']
+                    report_df
+
+            for prop in report_dict[target]:
+                if prop.key() == 'vulns':
+                    for v in report_dict[target][prop]:
+
+        # for i in range(len(report_dict['Vulnerability Name'])): # build the dataframe that stores all vulnerability data gleaned from the new Nessus reports
+        #     report_df.loc[i, 'Vulnerability Name'] = report_dict['Vulnerability Name'][i]
+        #     report_df.loc[i, 'Plugin ID'] = report_dict['Plugin ID'][i]
+        #     report_df.loc[i, 'Target'] = report_dict['Target'][i]
+        #     report_df.loc[i, 'Device Name'] = report_dict['Device Name'][i]
+        #     report_df.loc[i, 'MAC'] = report_dict['MAC'][i]
+        #     report_df.loc[i, 'OS'] = report_dict['OS'][i]
+        #     report_df['Last Scanned'] = scandate
+        #     report_df['Analyst'] = analyst
+        #     if d == 'y':
+        #         report_df['Analysis Date'] = scandate
+        #     report_df.loc[i, 'CVSS'] = report_dict['CVSS'][i]
+        #     report_df.loc[i, 'References'] = report_dict['References'][i]
+
+main()
