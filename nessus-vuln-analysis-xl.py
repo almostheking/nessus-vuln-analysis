@@ -72,27 +72,34 @@ def _Parse_Nessus(report_path):
     parz = etree.XMLParser(huge_tree=True)
     root = etree.fromstring(text=xml_content, parser=parz)
     for block in root:
-        if block.tag == "Report":
-            client = block.attrib['name'].split(" ", 1)[0] # Grabs the client acronym from the scan name
-            for ReportHost in block:
-                props_dict = dict() # dict for holding host properties
-                for ReportItem in ReportHost:
-                    vuln_dict = dict() # dict for holding individual vulnerability details; to be attached to the host props dict
-                    if ReportItem.tag == "HostProperties":
-                        for prop in ReportItem:
-                            if prop.attrib['name'] in host_params:
-                                #if prop.attrib['name'] == "mac-address" and "virtual-mac-address" in prop.attrib.values(): #WORKING ON MAC SORTING WHEN THERE'S MORE THAN ONE
-                                    vmacs = prop.attrib['name']
-                                props_dict[prop.attrib['name']] = prop.text
-                    else:
-                        for attr in ReportItem.attrib:
-                            if attr in vuln_params:
-                                vuln_dict[attr] = ReportItem.attrib[attr]
-                        for param in ReportItem:
-                            if param.tag in vuln_params:
-                                vuln_dict[param.tag] = param.text
-                        props_dict['vulns'] = vuln_dict
-                report_dict[ReportItem.attrib['name']] = props_dict
+      if block.tag == "Report":
+          client = block.attrib['name'].split(" ", 1)[0] # Grabs the client acronym from the scan name
+          for ReportHost in block:
+              props_dict = dict() # dict for holding host properties
+              vulns_dict = dict() # dict for holding individual vulnerability dicts
+              for ReportItem in ReportHost:
+                  if ReportItem.tag == "HostProperties": # assemble host properties
+                      for prop in ReportItem:
+                          if prop.attrib['name'] in host_params:
+                              if prop.attrib['name'] == "mac-address" and len(prop.text) > 17: # if property is mac, sorts them so that they are the same order every run
+                                  macs = prop.text.split("\n", 100)
+                                  macs.sort()
+                                  final_macs = '\n'.join(macs)
+                                  props_dict[prop.attrib['name']] = final_macs
+                              else:
+                                  props_dict[prop.attrib['name']] = prop.text
+                  else: # assemble vuln details
+                      vuln_dict = dict()
+                      for attr in ReportItem.attrib:
+                          if attr in vuln_params:
+                              vuln_dict[attr] = ReportItem.attrib[attr]
+                      for param in ReportItem:
+                          if param.tag in vuln_params:
+                              vuln_dict[param.tag] = param.text
+                      vulns_dict[ReportItem.attrib['pluginID']] = vuln_dict
+                  props_dict['vulns'] = vulns_dict
+              report_dict[ReportHost.attrib['name']] = props_dict
+      return report_dict, client
 
 
 def main ():
