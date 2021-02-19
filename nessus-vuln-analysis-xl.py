@@ -1,4 +1,6 @@
-import re
+import re # used for regexp in conditionals
+from sys import exit, argv # used for safe exiting and accepting optional command-line arguments
+import getopt # used for managing optional command-line arguments
 import datetime # used for formatting dates for conditionals and displaying
 from openpyxl import Workbook, load_workbook # used for core spreadsheet object initialization
 from openpyxl.styles import NamedStyle, Border, Side, Alignment, Protection, PatternFill, Color, Font, colors # used for defining spreadsheet cell styles
@@ -6,10 +8,8 @@ from openpyxl.worksheet.datavalidation import DataValidation # used for adding d
 from openpyxl.cell import Cell
 from lxml import etree # used for parsing .nessus files
 import datetime # used for formatting scan date and accurately comparing datetime values
-import os
-from os import path # used for file pathing and file backups
+from os import path, mkdir # used for file pathing and file backups
 import pandas as pd # used for compiling and comparing vulnerabiltiy data sets
-#from itertools import islice
 
 # Global constants for the date and spreadsheet formatting options
 DATE = datetime.datetime.today()
@@ -45,6 +45,37 @@ the_rest_style.border = border
 def _Err_Exit (error_text):
     print(error_text)
     sys.exit()
+
+# Display commandline help text
+def _Opt_Help ():
+    print('''For CLI usage, provide an option of 1 through 5; otherwise, you'll be prompted to use the interactive prompt.
+             Example usage:
+                Import .nessus file into spreadsheet:
+                    nessus-vuln-analysis.py -2 -n "C:\Users\Me\Report.nessus" -s "C:\Users\Me\Analysis_Spreadsheet.xlsx"
+
+                -h : print this help text
+                -i : follow the script's interactive prompt
+                -1 : generate a fresh analysis spreadsheet and exit; optional arguments for new filepath and sheet names
+                -2 : import a .nessus file into an existing analysis spreadsheet and exit; optional arguments for paths to nessus file and spreadsheet
+                -3 : add a new sheet(s) to an existing analysis spreadsheet and exit; optional argument for sheet name(s)
+                -4 : generate a remediation report and exit; optional arguments for sheet name and month number
+                -5 : transition to a new spreadsheet, saving it in the same directory as the old one, and exit; optional arguments for old spreadsheet path
+                -n : the path to a .nessus report file; include the extension!
+                -s : the path to an analysis spreadsheet compatible with this script; include the extension!
+                -t : provide a sheet name or list of sheet names (comma-separated, no spaces!) to pass into functions that require them
+                -m : provide a number that represents a month; the month number associations are as follows:
+                         Jan : 1
+                         Feb : 2
+                         Mar : 3
+                         Apr : 4
+                         May : 5
+                         Jun : 6
+                         Jul : 7
+                         Aug : 8
+                         Sep : 9
+                         Oct : 10
+                         Nov : 11
+                         Dec : 12''')
 
 # Takes string instructions and a flag for whether or not an extension is expected and exits if too many failed attempts occur or some other issue occurs
 def _Input_Path (instruct, opt):
@@ -92,14 +123,14 @@ def _Input_Path (instruct, opt):
                 continue
     return p
 
-# Asks for string input sheet name and checks to see if it's valid within the context of a valid vuln mgmt workbook
+# Takes a string input sheet name and checks to see if it's valid within the context of a valid vuln mgmt workbook
 def _Input_Sheet (instruct, wb):
     count = 0
     while True:
         sheet = input(instruct+': ')
         if count == 3:
             _Err_Exit('\nYou seem to be having trouble. Confirm your desired sheet\'s name and come back later.\nExiting...')
-        elif sheet != 'statuses' and sheet != 'columns' and sheet != 'targets':
+        elif sheet != 'statuses' and sheet != 'columns':
             try:
                 ws = wb[sheet]
                 break
@@ -113,7 +144,22 @@ def _Input_Sheet (instruct, wb):
             continue
     return sheet
 
-# Give me a dict and a client acronym...
+# Backs up the analysis spreadsheet to a local directory
+def _Backup (existing_spreadsheet):
+    if path.isdir('\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\Vulnerability Analysis Backups'):
+        print("Now saving to backup to Vulnerability Analysis Backups directory...")
+        shutil.copyfile(existing_spreadsheet, '\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\Vulnerability Analysis Backups\\'+existing_spreadsheet.split('\\')[-1]+DATE.strftime(" %Y_%m_%d %H%M%S")+'.bak')
+    else:
+        bak = input("No dedicated backup directory specified in this running location. Would you like to create one? y|n: ")
+        if bak == 'y':
+            print("Creating backup directory and saving the backup workbook to it...")
+            os.mkdir('\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\\\Vulnerability Analysis Backups')
+            shutil.copyfile(existing_spreadsheet, '\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\Vulnerability Analysis Backups\\'+existing_spreadsheet.split('\\')[-1]+DATE.strftime(" %Y_%m_%d %H%M%S")+'.bak')
+        else:
+            print("Backup file is being saved to the current working directory...")
+            shutil.copyfile(existing_spreadsheet, ''.join(existing_spreadsheet.split('\\')[:-2])+existing_spreadsheet.split('\\')[:-1]+DATE.strftime(" %Y_%m_%d %H%M%S")+'.bak')
+
+# Takes the Nessus XML report and generates a dictionary
 def _Parse_Nessus(report_path):
     client = ""
     report_dict = dict()
@@ -247,7 +293,7 @@ def _Set_Row_Format (ws):
                 cell.border = gray_border
     return ws
 
-def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
+def _Gen_Fresh_Workbook (spreadsheet, sheets):
     statuses_data = {'Status':['Pending Analysis', 'Pending Ticket Creation', # define the data that goes into the default reference sheets
                                 'Pending Patch Cycle', 'Pending Remediation', 'Pending Reevaluation',
                                 'Risk Ack. Needed', 'False Positive Doc. Needed',
@@ -316,7 +362,7 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
     statuses_df = pd.DataFrame(statuses_data) # create the not-yet-formatted dataframes that hold the above data dictionaries
     columns_df = pd.DataFrame(columns_data)
 
-    writer = pd.ExcelWriter(filepath+"\\"+filename+".xlsx", engine='xlsxwriter') # initialize the new spreadsheet writer object and a workbook object to work with
+    writer = pd.ExcelWriter(spreadsheet, engine='xlsxwriter') # initialize the new spreadsheet writer object and a workbook object to work with
     workbook = writer.book
 
     pgraph = workbook.add_format({'text_wrap': True, # define various cell styles and formats compatible with the xlsxwriter writer object
@@ -351,7 +397,7 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
                                 'border': True,
                                 'border_color': 'black'})
 
-    for s in sheetnames: # iterate over the sheetnames you provided previously
+    for s in sheets: # iterate over the sheetnames you provided previously
         worksheet_df = pd.DataFrame(columns=columns_df['Column']) # create temp dataframe using column names according to those listed in the 'columns' sheet
         worksheet_df.to_excel(writer, s, index=False) # transfer temp dataframe to the spreadsheet object as a new sheet
         ws = writer.sheets[s] # define a new temp sheet object in order to freeze the first row column names and set formats
@@ -377,7 +423,7 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
     writer.save() # save the spreadsheet object and close it
     writer.close()
 
-    wb = load_workbook(filepath+"\\"+filename+".xlsx", read_only=False) # initialize a new workbook object so we can modify the now-existing xlsx file
+    wb = load_workbook(spreadsheet, read_only=False) # initialize a new workbook object so we can modify the now-existing xlsx file
 
     wb.add_named_style(vuln_name_style) # add the previously defined styles to the workbook object so they can be used; this should stick between saves
     wb.add_named_style(the_rest_style)
@@ -489,7 +535,36 @@ def _Finagle_WB (existing_spreadsheet, wb, vuln_analysis_df, target_sheet):
     #wb.close()
     #writer.close()
 
-def main ():
+def _1_Create_Fresh_Spreadsheet (spreadsheet, sheets):
+    if spreadsheet == '':
+        spreadsheet = _Input_Path
+
+    filename = input("Enter a filename (no ext.) for your new workbook: ")
+    filepath = input("Enter an output path for your new workbook: ")
+    sheetnames = input("Enter a comma-separated list (no spaces) of sheet names to create: ").split(',')
+    _Gen_Fresh_Workbook(filename, filepath, sheetnames)
+
+def main (argv):
+    nessusfile = ''
+    spreadsheet = ''
+    sheets = ''
+    month = ''
+    try:
+        opts, args = getopt.getopt(argv,"h12345in:s:t:m:",["nessusfile=","spreadsheet=","sheets=","month="])
+    except: getopt.GetoptError:
+        _Opt_Help()
+        exit(2)
+
+    for opt, arg in opts:
+        if opt == '-h':
+            _Opt_Help()
+            exit()
+        elif opt == "-1":
+            _1_Create_Fresh_Spreadsheet(spreadsheet, sheets)
+            exit()
+        elif opt == "-i":
+            break
+
     print("----------MENU----------")
     print("1. Create fresh spreadsheet")
     print("2. Feed new reports")
@@ -508,6 +583,7 @@ def main ():
         report_path = _Input_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
         report_dict, client = _Parse_Nessus(report_path) # parse .nessus file for report dict and sheet (client) name
         existing_spreadsheet = _Input_Path("Enter a path to your existing analysis spreadsheet", 'x')
+        _Backup(existing_spreadsheet)
 
         wb = load_workbook(existing_spreadsheet, read_only=False)
         target_sheet = _Input_Sheet("Enter the name of the worksheet to load the results into", wb)
@@ -559,4 +635,4 @@ def main ():
         vuln_analysis_df = _Add_New_Vulns(vuln_analysis_df, report_df) # add new vulnerability/target combos to the analysis dataframe
         _Finagle_WB(existing_spreadsheet, wb, vuln_analysis_df, target_sheet)
 
-main()
+main(argv[1:])
