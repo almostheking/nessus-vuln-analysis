@@ -1,11 +1,15 @@
+import re
 import datetime # used for formatting dates for conditionals and displaying
 from openpyxl import Workbook, load_workbook # used for core spreadsheet object initialization
 from openpyxl.styles import NamedStyle, Border, Side, Alignment, Protection, PatternFill, Color, Font, colors # used for defining spreadsheet cell styles
 from openpyxl.worksheet.datavalidation import DataValidation # used for adding data validation to excel cells
+from openpyxl.cell import Cell
 from lxml import etree # used for parsing .nessus files
 import datetime # used for formatting scan date and accurately comparing datetime values
-import os # used for file pathing and file backups
+import os
+from os import path # used for file pathing and file backups
 import pandas as pd # used for compiling and comparing vulnerabiltiy data sets
+#from itertools import islice
 
 # Global constants for the date and spreadsheet formatting options
 DATE = datetime.datetime.today()
@@ -36,6 +40,11 @@ the_rest_style.alignment = Alignment(horizontal='center',
                                      wrapText=True)
 vuln_name_style.border = border # applies the thin black border to all custom cell styles
 the_rest_style.border = border
+
+# Takes an error description and exits the program - used during input validation
+def _Err_Exit (error_text):
+    print(error_text)
+    sys.exit()
 
 # Takes string instructions and a flag for whether or not an extension is expected and exits if too many failed attempts occur or some other issue occurs
 def _Input_Path (instruct, opt):
@@ -170,7 +179,7 @@ def _Parse_Nessus(report_path):
           for prop in report_dict[host]:
               if prop == "vulns":
                   for plugin in report_dict[host][prop]:
-                      if plugin in fails:
+                      if plugin in cred_fail_plugins:
                           fail_count+=1
           if fail_count == 0:
               report_dict[host]["auth"] = 's'
@@ -214,6 +223,30 @@ def _Set_Col_Widths (ws):
     ws.column_dimensions['V'].width = 18
     return ws
 
+# Setting cell format based on the row's 'Status' field is needed several times throughout the program's functions
+def _Set_Row_Format (ws):
+    for row in ws.iter_rows():
+        if row[14].value == '':
+            row[14].value = 'Pending Analysis'
+        if row[14].value == "Pending Analysis" or row[14].value == "Pending Ticket Creation" or row[14].value == "Pending Reevaluation":
+            for cell in row:
+                cell.fill = my_bad
+                cell.font = bad_font
+        elif row[14].value == "Pending Patch Cycle" or row[14].value == "Pending Remediation" or row[14].value == "On Hold":
+            for cell in row:
+                cell.fill = my_neutral
+                cell.font = neutral_font
+        elif re.compile("Remed.*").match(row[14].value) or row[14].value == "Closed":
+            for cell in row:
+                cell.fill = my_good
+                cell.font = good_font
+        elif row[14].value == "Risk Ack. Needed" or row[14].value == "False Positive Doc. Needed":
+            for cell in row:
+                cell.fill = my_check
+                cell.font = check_font
+                cell.border = gray_border
+    return ws
+
 def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
     statuses_data = {'Status':['Pending Analysis', 'Pending Ticket Creation', # define the data that goes into the default reference sheets
                                 'Pending Patch Cycle', 'Pending Remediation', 'Pending Reevaluation',
@@ -237,9 +270,9 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
                                                 "This status and all other month-based remediation statuses signify the vulnerability has been handled and will not be seen again on the device in question. Having separate remediation statuses for every month allows for the use of macros to generate remediation reports for any given month out of the year.", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\"", "\""]}
     columns_data = {'Column':['Vulnerability Name',
                               'Plugin ID',
+                              'Target',
                               'Device Name',
                               'MAC(s)',
-                              'IP',
                               'OS',
                               'Port',
                               'Service',
@@ -259,9 +292,9 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
                               'Robot Note'],
                                 'Explanation':["The name of the vulnerability as it is reported by the scan source.",
                                 "The scanner plugin that detected the vulnerability.",
+                                "The target identifier used by the scan to identify unique targets detected.",
                                 "The DNS name or NetBIOS name of the target host - this is not a fixed or globally unique identifier!",
                                 "The device's MAC address; contains multiple addresses if the scanner detects multiple network interfaces. If a MAC is not detected, '???' will be listed. This severely limits the Python tool's ability to examine vulnerability entries.",
-                                "The IP address of the host detected at the time of the scan - this is liable to change according to DHCP whims.",
                                 "The detected OS; this is most likely not accurate. Don't rely on it.",
                                 "The port that the vulnerability was detected on.",
                                 "The service name using the port in question. Determination of the name happens on the scanner's side, not the target's side.",
@@ -353,12 +386,107 @@ def _Gen_Fresh_Workbook (filename, filepath, sheetnames):
         if sheet in sheetnames: # check if the current sheet is one of the analysis sheets
             ws1 = wb[sheet] # initialize a worksheet object to apply styles and widths
             ws1.add_data_validation(data_val) # applies data validation to the statuses column so that the program's modification logic doesn't hit any snags
-            data_val.add('O2:O1048576')
+            data_val.add("S2:S1048576")
             ws1 = _Set_Col_Styles(ws1) # iterate over cells in specified columns and apply styles
             ws1 = _Set_Col_Widths(ws1) # set custom column widths
 
     wb.save(filepath+"\\"+filename+".xlsx") # finally save and close the fresh worksheet, ready to be fed into the program
     wb.close()
+
+# Modifies existing entries in the target sheet only based on vulnerabilities found (or not found) in the new report
+def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
+    common_name_indices = []
+    common_indices = []
+    report_indices = []
+    diff_indices = []
+    # check each existing vulnerability in the analysis spreadsheet for matches in both the vuln name AND mac address columns in the new report dataframe; then modify the existing vulnerability row in-place based on various checks
+    for old_vuln in vuln_analysis_df['Vulnerability Name']:
+        lst = report_df[report_df['Vulnerability Name'] == old_vuln].index.tolist()
+        common_name_indices.append(lst) # list of lists of indices specifying where the spreadsheet contains vuln names in common with the report vuln names
+    for lst_no in range(len(common_name_indices)):
+        for index in common_name_indices[lst_no]:
+            if vuln_analysis_df.iloc[lst_no]['MAC(s)'] == report_df.iloc[index]['MAC(s)']:
+                if report_df.iloc[index]['MAC(s)'] == '???':
+                    vuln_analysis_df.loc[(lst_no, 'Status')] = 'Pending Reevaluation'
+                    vuln_analysis_df.loc[(lst_no, 'Robot Note')] = 'A MAC address could not be detected for this device, but it was in a recent scan - please manually determine the status of this vulnerability (delete this note)'
+                else:
+                    common_indices.append(lst_no) # pick out list of list indices where BOTH the vuln names and mac address cells represent matches between both dataframes
+                    report_indices.append(index)
+
+    for row in common_indices: # iterate over rows (that represent vulnerabilities in common with the new report) that need to be checked pending modification
+        if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
+            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
+                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
+                if vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle': # change the status of rows needing a reevaluation based on patch cycle
+                    vuln_analysis_df.loc[(row, 'Status')] = 'Pending Reevaluation'
+                    vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending patch cycle - re-examine vulnerability.'
+                elif vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation': # change the status of rows needing reevaluation based on whether risk was low and remediation was delayed
+                    if vuln_analysis_df.iloc[row]['Risk'] == 'Med' or vuln_analysis_df.iloc[row]['Risk'] == 'Low':
+                        vuln_analysis_df.loc[(row, 'Status')] = 'Pending Reevaluation'
+                        vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending ticket creation and med/low risk - time to process it now?'
+                    if vuln_analysis_df.iloc[row]['Risk'] == 'High' or vuln_analysis_df.iloc[row]['Risk'] == 'Crit':
+                        vuln_analysis_df.loc[(row, 'Status')] = 'Pending Reevaluation'
+                        vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending ticket creation and crit/high risk - HANDLE IT THIS CYCLE.'
+                elif re.compile("Remed.*").match(vuln_analysis_df.iloc[row]['Status']): # change the status of rows that were marked remediated in error
+                    vuln_analysis_df.loc[(row, 'Status')] = 'Pending Reevaluation'
+                    vuln_analysis_df.loc[(row, 'Robot Note')] = 'marked remediated but was picked up in last scan - re-examine host.'
+        if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
+            vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
+
+    for i in range(len(vuln_analysis_df['Vulnerability Name'])): # build list of individual spreadsheet indices that represent vulnerabilities that do not appear in the provided scan report
+        if i not in common_indices:
+            diff_indices.append(i)
+
+    for row in diff_indices: # iterate over rows (that represent vulnerabilities that do not reappear in the provided scan report) that need to be checked pending modification
+        if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
+            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
+                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
+                if (vuln_analysis_df.iloc[row]['Status'] == 'Pending Remediation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Analysis' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle'):
+                    vuln_analysis_df.loc[(row, 'Status')] = 'Remediated'+' - '+(DATE.strftime('%b'))
+                    vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending, and was not found in the last credentialed check of the host - marked remediated.'
+        if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
+            vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
+
+# Identifies never-before-seen vulnerabilities in the report dataframe and appends them to the spreadsheet dataframe
+def _Add_New_Vulns (vuln_analysis_df, report_df):
+    merged_df = report_df.merge(vuln_analysis_df, how='inner', on = ['Vulnerability Name', 'Device Name', 'MAC(s)'], suffixes=('','_y')) # generate a dataframe with rows that match between the sheet df and the report df
+    merged_df.drop(list(merged_df.filter(regex='_y$')), axis=1, inplace=True) # strip away unwanted columns created by the merge
+    diff_df = pd.concat([report_df, merged_df], sort=False) # concatenate the report df and the df containg similarities between the sheet df and the report df
+    diff_df2 = diff_df.drop_duplicates(subset=['Vulnerability Name', 'Target', 'MAC'],keep=False) # drop all except unique entries, leaving us only with report df vulnerability/host combos that are totally unique to the report and never appear in the sheet df
+    return vuln_analysis_df.append(diff_df2, ignore_index=True, sort=False) # return the generated final df onto the working sheet df
+
+# Performs all modification of the analysis spreadsheet after analyzing the scan reports
+def _Finagle_WB (existing_spreadsheet, wb, vuln_analysis_df, target_sheet):
+    writer = pd.ExcelWriter(existing_spreadsheet, engine='openpyxl') # declare engine to write dataframes to the spreadsheet
+    writer.book = wb # define the workbook that the writer writes to
+    print("Making changes in "+existing_spreadsheet.split('\\')[-1]+"...")
+    wb.remove(wb[target_sheet]) # remove the unedited sheet in prep for adding modified ones
+
+    vuln_analysis_df.to_excel(writer, sheet_name=target_sheet, index=False, engine='openpyxl') # delicately place new dataframes into the excel spreadsheet and define a new worksheet object to add in-place formatting to
+    ws1 = wb[target_sheet]
+
+    ws1 = _Set_Col_Styles(ws1) # apply baseline alignment and border formats to appropriate columns in both the working sheet and targets sheet
+
+    ws1 = _Set_Row_Format(ws1) # fine-tune formatting (color, border, font, etc.) based on vulnerability status
+
+    sheetnames = [s for s in wb.sheetnames if s != 'statuses' or s != 'columns'] # get list of sheets to iterate through so we can apply data validation to Statuses columns
+
+    for s in sheetnames: # apply dropdown menu data validation to the Statuses column in every sheet
+        for sheet in wb.sheetnames:
+            if s == sheet:
+                ws2 = wb[s]
+                ws2.add_data_validation(data_val)
+                data_val.add("S2:S1048576") # specifies the column/rows to apply to; the second value means ALL rows under column O
+
+    ws1 = _Set_Col_Widths(ws1) # set adequate column widths for all columns in the working sheet as well as the targets sheet
+
+    ws1.freeze_panes = "A2" # freeze top row column names
+
+    print("Saving and closing "+existing_spreadsheet.split('\\')[-1]+".")
+    wb.save(existing_spreadsheet) # save and close objects, finalizing spreadsheet changes
+    writer.save()
+    wb.close()
+    writer.close()
 
 def main ():
     print("----------MENU----------")
@@ -395,27 +523,36 @@ def main ():
         row = 0
         for target in report_dict:
             for v in report_dict[target]['vulns']:
-                if v['severity'] == ('3' or '4' or '5'):
-                    report_df.loc[row, 'Vulnerability Name'] = v['pluginName']
-                    report_df.loc[row, 'Plugin ID'] = v['pluginID']
-                    report_df
+                if report_dict[target]['vulns'][v]['severity'] == '3' or report_dict[target]['vulns'][v]['severity'] == '4':
+                    report_df.loc[row, 'Vulnerability Name'] = report_dict[target]['vulns'][v]['pluginName']
+                    report_df.loc[row, 'Plugin ID'] = report_dict[target]['vulns'][v]['pluginID']
+                    report_df.loc[row, 'Target'] = target
+                    # import Device Name
+                    if report_dict[target].has_key('host-rdns'):
+                        report_df.loc[row, 'Device Name'] = report_dict[target]['host-rdns']
+                    elif report_dict[target].has_key('netbios-name'):
+                        report_df.loc[row, 'Device Name'] = report_dict[target]['netbios-name']
+                    else:
+                        report_df.loc[row, 'Device Name'] = report_dict[target]['host-ip']
+                    # import MAC(s)
+                    if report_dict[target].has_key('mac-address'):
+                        report_df.loc[row, 'MAC(s)'] = report_dict[target]['mac-address']
+                    else:
+                        report_df.loc[row, 'MAC(s)'] = '???'
+                    report_df.loc[row, 'OS'] = report_dict[target]['operating-system']
+                    report_df.loc[row, 'Port'] = report_dict[target]['vulns'][v]['port']
+                    report_df.loc[row, 'Service'] = report_dict[target]['vulns'][v]['svc_name']
+                    report_df.loc[row, 'Synopsis'] = report_dict[target]['vulns'][v]['synopsis']
+                    report_df.loc[row, 'Output'] = report_dict[target]['vulns'][v]['plugin_output']
+                    report_df.loc[row, 'Last Scanned'] = report_dict[target]['HOST_START'] # EX: datetime.datetime.strptime('Tue Jan 26 08:56:53 2021', '%a %b %d %H:%M:%S %Y')
+                    report_df.loc[row, 'Severity'] = report_dict[target]['vulns'][v]['severity']
+                    report_df.loc[row, 'Solution'] = report_dict[target]['vulns'][v]['solution']
+                    report_df.loc[row, 'Vulnerability Details'] = 'https://www.tenable.com/plugins/nessus/' + report_dict[target]['vulns'][v]['pluginID']
+                    row+=1
 
-            for prop in report_dict[target]:
-                if prop.key() == 'vulns':
-                    for v in report_dict[target][prop]:
-
-        # for i in range(len(report_dict['Vulnerability Name'])): # build the dataframe that stores all vulnerability data gleaned from the new Nessus reports
-        #     report_df.loc[i, 'Vulnerability Name'] = report_dict['Vulnerability Name'][i]
-        #     report_df.loc[i, 'Plugin ID'] = report_dict['Plugin ID'][i]
-        #     report_df.loc[i, 'Target'] = report_dict['Target'][i]
-        #     report_df.loc[i, 'Device Name'] = report_dict['Device Name'][i]
-        #     report_df.loc[i, 'MAC'] = report_dict['MAC'][i]
-        #     report_df.loc[i, 'OS'] = report_dict['OS'][i]
-        #     report_df['Last Scanned'] = scandate
-        #     report_df['Analyst'] = analyst
-        #     if d == 'y':
-        #         report_df['Analysis Date'] = scandate
-        #     report_df.loc[i, 'CVSS'] = report_dict['CVSS'][i]
-        #     report_df.loc[i, 'References'] = report_dict['References'][i]
+        print("Modifying target analysis sheet with new scan data...")
+        _Mod_Analysis_Spreadsheet(vuln_analysis_df, report_df, report_dict) # change the existing spreadsheet's dataframe to reflect new report data
+        vuln_analysis_df = _Add_New_Vulns(vuln_analysis_df, report_df) # add new vulnerability/target combos to the analysis dataframe
+        _Finagle_WB(existing_spreadsheet, wb, vuln_analysis_df, target_sheet)
 
 main()
