@@ -1,4 +1,7 @@
+env_lap/
+env_office/
 env/
+*env*
 test/
 *test*
 old/
