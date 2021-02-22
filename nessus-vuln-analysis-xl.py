@@ -9,6 +9,7 @@ from openpyxl.cell import Cell
 from lxml import etree # used for parsing .nessus files
 import datetime # used for formatting scan date and accurately comparing datetime values
 from os import path, mkdir # used for file pathing and file backups
+import shutil
 import pandas as pd # used for compiling and comparing vulnerabiltiy data sets
 
 # Global constants for the date and spreadsheet formatting options
@@ -44,14 +45,14 @@ the_rest_style.border = border
 # Takes an error description and exits the program - used during input validation
 def _Err_Exit (error_text):
     print(error_text)
-    sys.exit()
+    exit()
 
 # Display commandline help text
 def _Opt_Help ():
-    print('''For CLI usage, provide an option of 1 through 5; otherwise, you'll be prompted to use the interactive prompt.
+    help = r"""For CLI usage, provide an option of 1 through 5; otherwise, you'll be prompted to use the interactive prompt.
              Example usage:
                 Import .nessus file into spreadsheet:
-                    nessus-vuln-analysis.py -2 -n "C:\Users\Me\Report.nessus" -s "C:\Users\Me\Analysis_Spreadsheet.xlsx"
+                    nessus-vuln-analysis.py -2 -n \"C:\Users\Me\Report.nessus\" -s \"C:\Users\Me\Analysis_Spreadsheet.xlsx\"
 
                 -h : print this help text
                 -i : follow the script's interactive prompt
@@ -75,19 +76,40 @@ def _Opt_Help ():
                          Sep : 9
                          Oct : 10
                          Nov : 11
-                         Dec : 12''')
+                         Dec : 12"""
+    print(help)
 
 # Takes string instructions and a flag for whether or not an extension is expected and exits if too many failed attempts occur or some other issue occurs
-def _Input_Path (instruct, opt):
+def _Check_Path (p, opt):
     count = 0 # counts errors
     while True:
-        try:
-            p = str(input(instruct+': '))
-        except:
-            "\nUnexpected error. Try again...\n"
-
+    #     try:
+    #         p = str(input(instruct+': '))
+    #     except:
+    #         "\nUnexpected error. Try again...\n"
         if count == 3:
             _Err_Exit('\nYou seem to be having trouble. Confirm your desired path and come back later.\nExiting...')
+        elif opt == 'v': # v option checks if given path / file combo is valid as a new spreadsheet
+            f = p.split(".")
+            dr = p.split("\\")
+            dr2 = "\\".join(dr[:-2])
+            if path.isdir(dr2):
+                if f[-1] == 'xlsx':
+                    break
+                else:
+                    p = p+'.xlsx'
+                    break
+            else:
+                count+=1
+                print('\nInvalid directory selected. Try again...\n')
+                continue
+        elif opt == 'n': # n option indicates path to .nessus file, checks for valid file based on extension
+            if path.isfile(p) and p.split(".")[-1] == "nessus":
+                break
+            else:
+                count+=1
+                print('\nThat\'s not a valid nessus file. Try again...\n')
+                continue
         elif opt == 'f': # f option indicates path directly to file, checks simply for valid path
             if path.isfile(p):
                 break
@@ -124,10 +146,10 @@ def _Input_Path (instruct, opt):
     return p
 
 # Takes a string input sheet name and checks to see if it's valid within the context of a valid vuln mgmt workbook
-def _Input_Sheet (instruct, wb):
+def _Check_Sheet (sheet, wb):
     count = 0
     while True:
-        sheet = input(instruct+': ')
+        #sheet = input(instruct+': ')
         if count == 3:
             _Err_Exit('\nYou seem to be having trouble. Confirm your desired sheet\'s name and come back later.\nExiting...')
         elif sheet != 'statuses' and sheet != 'columns':
@@ -144,6 +166,14 @@ def _Input_Sheet (instruct, wb):
             continue
     return sheet
 
+def _Check_Opt_Path (opt_path):
+    dr = opt_path.split("\\")
+    dr2 = "\\".join(dr[:-2])
+    if path.isdir(dr2):
+        what = 1
+    else:
+        _Err_Exit("The path you provided is bad.\n")
+
 # Backs up the analysis spreadsheet to a local directory
 def _Backup (existing_spreadsheet):
     if path.isdir('\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\Vulnerability Analysis Backups'):
@@ -153,7 +183,7 @@ def _Backup (existing_spreadsheet):
         bak = input("No dedicated backup directory specified in this running location. Would you like to create one? y|n: ")
         if bak == 'y':
             print("Creating backup directory and saving the backup workbook to it...")
-            os.mkdir('\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\\\Vulnerability Analysis Backups')
+            mkdir('\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\\\Vulnerability Analysis Backups')
             shutil.copyfile(existing_spreadsheet, '\\'.join(existing_spreadsheet.split('\\')[:-1])+'\\Vulnerability Analysis Backups\\'+existing_spreadsheet.split('\\')[-1]+DATE.strftime(" %Y_%m_%d %H%M%S")+'.bak')
         else:
             print("Backup file is being saved to the current working directory...")
@@ -238,7 +268,12 @@ def _Parse_Nessus(report_path):
 def _Set_Col_Styles (ws):
     for cell in ws['A']:
         cell.style = 'vuln_name_style'
-    for column in ws['B:V']:
+    for cell in ws['J']:
+        cell.style = 'vuln_name_style'
+    for column in ws['B:I']:
+        for cell in column:
+            cell.style = 'the_rest_style'
+    for column in ws['K:V']:
         for cell in column:
             cell.style = 'the_rest_style'
     return ws
@@ -251,21 +286,21 @@ def _Set_Col_Widths (ws):
     ws.column_dimensions['D'].width = 18
     ws.column_dimensions['E'].width = 18
     ws.column_dimensions['F'].width = 18
-    ws.column_dimensions['G'].width = 20
-    ws.column_dimensions['H'].width = 25
-    ws.column_dimensions['I'].width = 14
-    ws.column_dimensions['J'].width = 8
-    ws.column_dimensions['K'].width = 8
-    ws.column_dimensions['L'].width = 30
-    ws.column_dimensions['M'].width = 30
-    ws.column_dimensions['N'].width = 18
-    ws.column_dimensions['O'].width = 20
+    ws.column_dimensions['G'].width = 12
+    ws.column_dimensions['H'].width = 18
+    ws.column_dimensions['I'].width = 25
+    ws.column_dimensions['J'].width = 40
+    ws.column_dimensions['K'].width = 14
+    ws.column_dimensions['L'].width = 14
+    ws.column_dimensions['M'].width = 12
+    ws.column_dimensions['N'].width = 8
+    ws.column_dimensions['O'].width = 10
     ws.column_dimensions['P'].width = 25
-    ws.column_dimensions['Q'].width = 22
-    ws.column_dimensions['R'].width = 18
+    ws.column_dimensions['Q'].width = 25
+    ws.column_dimensions['R'].width = 12
     ws.column_dimensions['S'].width = 18
     ws.column_dimensions['T'].width = 18
-    ws.column_dimensions['U'].width = 18
+    ws.column_dimensions['U'].width = 12
     ws.column_dimensions['V'].width = 18
     return ws
 
@@ -421,7 +456,7 @@ def _Gen_Fresh_Workbook (spreadsheet, sheets):
     statuses_sheet.conditional_format('A10:A22', {'type': 'no_errors', 'format': green})
 
     writer.save() # save the spreadsheet object and close it
-    writer.close()
+    #writer.close()
 
     wb = load_workbook(spreadsheet, read_only=False) # initialize a new workbook object so we can modify the now-existing xlsx file
 
@@ -429,15 +464,15 @@ def _Gen_Fresh_Workbook (spreadsheet, sheets):
     wb.add_named_style(the_rest_style)
 
     for sheet in wb.sheetnames: # iterate over sheetnames as they occur in the spreadsheet previously created and saved
-        if sheet in sheetnames: # check if the current sheet is one of the analysis sheets
+        if sheet in sheets: # check if the current sheet is one of the analysis sheets
             ws1 = wb[sheet] # initialize a worksheet object to apply styles and widths
             ws1.add_data_validation(data_val) # applies data validation to the statuses column so that the program's modification logic doesn't hit any snags
             data_val.add("S2:S1048576")
             ws1 = _Set_Col_Styles(ws1) # iterate over cells in specified columns and apply styles
             ws1 = _Set_Col_Widths(ws1) # set custom column widths
 
-    wb.save(filepath+"\\"+filename+".xlsx") # finally save and close the fresh worksheet, ready to be fed into the program
-    wb.close()
+    wb.save(spreadsheet) # finally save and close the fresh worksheet, ready to be fed into the program
+    #wb.close()
 
 # Modifies existing entries in the target sheet only based on vulnerabilities found (or not found) in the new report
 def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
@@ -537,42 +572,209 @@ def _Finagle_WB (existing_spreadsheet, wb, vuln_analysis_df, target_sheet):
 
 def _1_Create_Fresh_Spreadsheet (spreadsheet, sheets):
     if spreadsheet == '':
-        spreadsheet = _Input_Path
+        spreadsheet = _Check_Path(input("Enter full path and name for your new spreadsheet: "), 'v')
+    else:
+        spreadsheet = _Check_Path(spreadsheet, 'v')
+    if sheets == '':
+        sheetz = input("Enter a comma-separated list (no spaces) of sheet names to create: ").replace(" ", "").split(',')
+    else:
+        sheetz = sheets.strip(" ").split(',')
+    _Gen_Fresh_Workbook(spreadsheet, sheetz)
+    # filename = input("Enter a filename (no ext.) for your new workbook: ")
+    # filepath = input("Enter an output path for your new workbook: ")
+    # sheetnames = input("Enter a comma-separated list (no spaces) of sheet names to create: ").split(',')
+    # _Gen_Fresh_Workbook(filename, filepath, sheetnames)
 
-    filename = input("Enter a filename (no ext.) for your new workbook: ")
-    filepath = input("Enter an output path for your new workbook: ")
-    sheetnames = input("Enter a comma-separated list (no spaces) of sheet names to create: ").split(',')
-    _Gen_Fresh_Workbook(filename, filepath, sheetnames)
+def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
+    if nessusfile == '':
+        nessusfile = _Check_Path(input("Enter a filepath to your .nessus file: "), 'n') # Provide path to .nessus report file for importing
+    else:
+        nessusfile = _Check_Path(nessusfile, 'n')
 
-def main (argv):
+    report_dict, client = _Parse_Nessus(nessusfile) # parse .nessus file for report dict and sheet (client) name
+
+    if spreadsheet == '':
+        spreadsheet = _Check_Path(input("Enter a path to your existing analysis spreadsheet"), 'x')
+    else:
+        spreadsheet = _Check_Path(spreadsheet, 'x')
+
+    _Backup(spreadsheet)
+    wb = load_workbook(spreadsheet, read_only=False)
+
+    if sheet == '':
+        sheet = _Check_Sheet(input("Enter the name of the worksheet to load the results into: "), wb)
+    else:
+        sheet = _Check_Sheet(sheet, wb)
+
+    ws = wb[sheet]
+    data = ws.values # for defining dataframe contents
+    columns = next(data)[0:] # for defining dataframe column names
+
+    print("Initializing and preparing vulnerability dataframes...\n")
+    vuln_analysis_df = pd.DataFrame(data, columns=columns)
+    vuln_analysis_df.dropna(axis=0, how='all', inplace=True) # drop null rows and clear the index away totally
+    report_df = pd.DataFrame().reindex_like(vuln_analysis_df) # create an empty duplicate of spreadsheet df for working with the Nessus reports
+
+    print("Building report dataframe...")
+    row = 0
+    for target in report_dict:
+        for v in report_dict[target]['vulns']:
+            if report_dict[target]['vulns'][v]['severity'] == '3' or report_dict[target]['vulns'][v]['severity'] == '4':
+                report_df.loc[row, 'Vulnerability Name'] = report_dict[target]['vulns'][v]['pluginName']
+                report_df.loc[row, 'Plugin ID'] = report_dict[target]['vulns'][v]['pluginID']
+                report_df.loc[row, 'Target'] = target
+                # import Device Name
+                if 'host-rdns' in report_dict[target].keys():
+                    report_df.loc[row, 'Device Name'] = report_dict[target]['host-rdns']
+                elif 'netbios-name' in report_dict[target].keys():
+                    report_df.loc[row, 'Device Name'] = report_dict[target]['netbios-name']
+                else:
+                    report_df.loc[row, 'Device Name'] = report_dict[target]['host-ip']
+                # import MAC(s)
+                if 'mac-address' in report_dict[target].keys():
+                    report_df.loc[row, 'MAC(s)'] = report_dict[target]['mac-address']
+                else:
+                    report_df.loc[row, 'MAC(s)'] = '???'
+                report_df.loc[row, 'OS'] = report_dict[target]['operating-system']
+                report_df.loc[row, 'Port'] = report_dict[target]['vulns'][v]['port']
+                report_df.loc[row, 'Service'] = report_dict[target]['vulns'][v]['svc_name']
+                report_df.loc[row, 'Synopsis'] = report_dict[target]['vulns'][v]['synopsis']
+                if 'plugin_output' in report_dict[target]['vulns'][v].keys():
+                    report_df.loc[row, 'Output'] = report_dict[target]['vulns'][v]['plugin_output']
+                else:
+                    report_df.loc[row, 'Output'] = 'N/A'
+                report_df.loc[row, 'Last Scanned'] = report_dict[target]['HOST_START'] # EX: datetime.datetime.strptime('Tue Jan 26 08:56:53 2021', '%a %b %d %H:%M:%S %Y')
+                report_df.loc[row, 'Severity'] = report_dict[target]['vulns'][v]['severity']
+                report_df.loc[row, 'Solution'] = report_dict[target]['vulns'][v]['solution']
+                report_df.loc[row, 'Vulnerability Details'] = 'https://www.tenable.com/plugins/nessus/' + report_dict[target]['vulns'][v]['pluginID']
+                row+=1
+
+    print("Modifying target analysis sheet with new scan data...")
+    _Mod_Analysis_Spreadsheet(vuln_analysis_df, report_df, report_dict) # change the existing spreadsheet's dataframe to reflect new report data
+    vuln_analysis_df = _Add_New_Vulns(vuln_analysis_df, report_df) # add new vulnerability/target combos to the analysis dataframe
+    _Finagle_WB(spreadsheet, wb, vuln_analysis_df, sheet)
+
+    #report_path = _Check_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
+    #report_dict, client = _Parse_Nessus(report_path) # parse .nessus file for report dict and sheet (client) name
+    #existing_spreadsheet = _Check_Path("Enter a path to your existing analysis spreadsheet", 'x')
+    #_Backup(existing_spreadsheet)
+#
+    #wb = load_workbook(existing_spreadsheet, read_only=False)
+    #target_sheet = _Check_Sheet("Enter the name of the worksheet to load the results into", wb)
+    #ws = wb[target_sheet]
+    #data = ws.values # for defining dataframe contents
+    #columns = next(data)[0:] # for defining dataframe column names
+
+    # print("Initializing and preparing vulnerability dataframes...\n")
+    # vuln_analysis_df = pd.DataFrame(data, columns=columns)
+    # vuln_analysis_df.dropna(axis=0, how='all', inplace=True) # drop null rows and clear the index away totally
+    # report_df = pd.DataFrame().reindex_like(vuln_analysis_df) # create an empty duplicate of spreadsheet df for working with the Nessus reports
+
+    # print("Building report dataframe...")
+    # row = 0
+    # for target in report_dict:
+    #     for v in report_dict[target]['vulns']:
+    #         if report_dict[target]['vulns'][v]['severity'] == '3' or report_dict[target]['vulns'][v]['severity'] == '4':
+    #             report_df.loc[row, 'Vulnerability Name'] = report_dict[target]['vulns'][v]['pluginName']
+    #             report_df.loc[row, 'Plugin ID'] = report_dict[target]['vulns'][v]['pluginID']
+    #             report_df.loc[row, 'Target'] = target
+    #             # import Device Name
+    #             if 'host-rdns' in report_dict[target].keys():
+    #                 report_df.loc[row, 'Device Name'] = report_dict[target]['host-rdns']
+    #             elif 'netbios-name' in report_dict[target].keys():
+    #                 report_df.loc[row, 'Device Name'] = report_dict[target]['netbios-name']
+    #             else:
+    #                 report_df.loc[row, 'Device Name'] = report_dict[target]['host-ip']
+    #             # import MAC(s)
+    #             if 'mac-address' in report_dict[target].keys():
+    #                 report_df.loc[row, 'MAC(s)'] = report_dict[target]['mac-address']
+    #             else:
+    #                 report_df.loc[row, 'MAC(s)'] = '???'
+    #             report_df.loc[row, 'OS'] = report_dict[target]['operating-system']
+    #             report_df.loc[row, 'Port'] = report_dict[target]['vulns'][v]['port']
+    #             report_df.loc[row, 'Service'] = report_dict[target]['vulns'][v]['svc_name']
+    #             report_df.loc[row, 'Synopsis'] = report_dict[target]['vulns'][v]['synopsis']
+    #             if 'plugin_output' in report_dict[target]['vulns'][v].keys():
+    #                 report_df.loc[row, 'Output'] = report_dict[target]['vulns'][v]['plugin_output']
+    #             else:
+    #                 report_df.loc[row, 'Output'] = 'N/A'
+    #             report_df.loc[row, 'Last Scanned'] = report_dict[target]['HOST_START'] # EX: datetime.datetime.strptime('Tue Jan 26 08:56:53 2021', '%a %b %d %H:%M:%S %Y')
+    #             report_df.loc[row, 'Severity'] = report_dict[target]['vulns'][v]['severity']
+    #             report_df.loc[row, 'Solution'] = report_dict[target]['vulns'][v]['solution']
+    #             report_df.loc[row, 'Vulnerability Details'] = 'https://www.tenable.com/plugins/nessus/' + report_dict[target]['vulns'][v]['pluginID']
+    #             row+=1
+    #
+    # print("Modifying target analysis sheet with new scan data...")
+    # _Mod_Analysis_Spreadsheet(vuln_analysis_df, report_df, report_dict) # change the existing spreadsheet's dataframe to reflect new report data
+    # vuln_analysis_df = _Add_New_Vulns(vuln_analysis_df, report_df) # add new vulnerability/target combos to the analysis dataframe
+    # _Finagle_WB(existing_spreadsheet, wb, vuln_analysis_df, target_sheet)
+    #
+    #
+    #
+    #
+
+def _Cycle_Opts (opts):
     nessusfile = ''
     spreadsheet = ''
     sheets = ''
     month = ''
+    for opt, arg in opts:
+        if opt == "-n":
+            nessusfile = arg
+        elif opt == "-s":
+            spreadsheet = arg
+        elif opt == "-t":
+            sheets = arg
+        elif opt == "-m":
+            month = arg
+    return nessusfile, spreadsheet, sheets, month
+
+def main (argv):
     try:
-        opts, args = getopt.getopt(argv,"h12345in:s:t:m:",["nessusfile=","spreadsheet=","sheets=","month="])
-    except: getopt.GetoptError:
+        opts, args = getopt.getopt(argv,"hi12345n:s:t:m:",["nessusfile=","spreadsheet=","sheets=","month="])
+    except getopt.GetoptError:
         _Opt_Help()
         exit(2)
 
-    for opt, arg in opts:
-        if opt == '-h':
-            _Opt_Help()
-            exit()
-        elif opt == "-1":
-            _1_Create_Fresh_Spreadsheet(spreadsheet, sheets)
-            exit()
-        elif opt == "-i":
-            break
+    selection = 0
+    menu_option = 0
+    while selection == 0:
+        for opt, arg in opts:
+            if opt == '-h':
+                _Opt_Help()
+                exit()
+            elif opt == "-i":
+                break
+            elif opt == "-1":
+                selection = 1
+                print(selection)
+            elif opt == "-2":
+                selection = 2
+        print(selection)
+        if selection == 0:
+            print("----------MENU----------")
+            print("1. Create fresh spreadsheet")
+            print("2. Feed new reports")
+            print("3. Add a new sheet to existing spreadsheet")
+            print("4. Generate a Remediation Report")
+            print("5. Transition to new workbook")
+            print("6. Exit")
+            selection = int(input("Enter a number option: "))
 
-    print("----------MENU----------")
-    print("1. Create fresh spreadsheet")
-    print("2. Feed new reports")
-    print("3. Add a new sheet to existing spreadsheet")
-    print("4. Generate a Remediation Report")
-    print("5. Transition to new workbook")
-    print("6. Exit")
-    option = int(input("Enter a number option: "))
+    if selection == 1:
+        nessusfile, spreadsheet, sheets, month = _Cycle_Opts(opts)
+        _1_Create_Fresh_Spreadsheet(spreadsheet, sheets)
+        exit()
+    if selection == 2:
+        nessusfile, spreadsheet, sheets, month = _Cycle_Opts(opts)
+        _2_Feed_New_Reports(nessusfile, spreadsheet, sheets)
+        exit()
+    #if selection == 3:
+    #if selection == 4:
+    #if selection == 5:
+    #if selection == 6:
+
+
 
     if option == 1:
         filename = input("Enter a filename (no ext.) for your new workbook: ")
@@ -580,13 +782,13 @@ def main (argv):
         sheetnames = input("Enter a comma-separated list (no spaces) of sheet names to create: ").split(',')
         _Gen_Fresh_Workbook(filename, filepath, sheetnames)
     if option == 2:
-        report_path = _Input_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
+        report_path = _Check_Path("Enter a filepath to your .nessus file", 'f') # Provide path to .nessus report file for importing
         report_dict, client = _Parse_Nessus(report_path) # parse .nessus file for report dict and sheet (client) name
-        existing_spreadsheet = _Input_Path("Enter a path to your existing analysis spreadsheet", 'x')
+        existing_spreadsheet = _Check_Path("Enter a path to your existing analysis spreadsheet", 'x')
         _Backup(existing_spreadsheet)
 
         wb = load_workbook(existing_spreadsheet, read_only=False)
-        target_sheet = _Input_Sheet("Enter the name of the worksheet to load the results into", wb)
+        target_sheet = _Check_Sheet("Enter the name of the worksheet to load the results into", wb)
         ws = wb[target_sheet]
         data = ws.values # for defining dataframe contents
         columns = next(data)[0:] # for defining dataframe column names
