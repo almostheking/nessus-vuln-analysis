@@ -6,6 +6,7 @@ from openpyxl import Workbook, load_workbook # used for core spreadsheet object 
 from openpyxl.styles import NamedStyle, Border, Side, Alignment, Protection, PatternFill, Color, Font, colors # used for defining spreadsheet cell styles
 from openpyxl.worksheet.datavalidation import DataValidation # used for adding data validation to excel cells
 from openpyxl.cell import Cell
+from openpyxl.utils.dataframe import dataframe_to_rows
 from lxml import etree # used for parsing .nessus files
 import datetime # used for formatting scan date and accurately comparing datetime values
 from os import path, mkdir # used for file pathing and file backups
@@ -601,12 +602,17 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
     _Backup(spreadsheet)
     wb = load_workbook(spreadsheet, read_only=False)
 
-    if sheet == '':
-        sheet = _Check_Sheet(input("Enter the name of the worksheet to load the results into: "), wb)
-    else:
-        sheet = _Check_Sheet(sheet, wb)
+    try:
+        ws = wb[client]
+        print("Target sheet name automatically gathered according to Scan name.")
+        sheet = client
+    except:
+        if sheet == '':
+            sheet = _Check_Sheet(input("Enter the name of the worksheet to load the results into: "), wb)
+        else:
+            sheet = _Check_Sheet(sheet, wb)
 
-    ws = wb[sheet]
+        ws = wb[sheet]
     data = ws.values # for defining dataframe contents
     columns = next(data)[0:] # for defining dataframe column names
 
@@ -824,7 +830,7 @@ def _4_Generate_Remed_Report (spreadsheet, sheet, month):
     report.save(filename = fn)
     report.close()
 
-    writer = pd.ExcelWriter(fn, engine='openpyxl')
+    #writer = pd.ExcelWriter(fn, engine='openpyxl')
     data = ws.values
     columns = next(data)[0:]
 
@@ -860,8 +866,8 @@ def _4_Generate_Remed_Report (spreadsheet, sheet, month):
     wsr.freeze_panes = "A3"
 
     for row in wsr.iter_rows():
-        if row[14].value != None:
-            if re.compile("Remed.*").match(row[14].value):
+        if row[18].value != None:
+            if re.compile("Remed.*").match(row[18].value):
                 for cell in row:
                     cell.fill = my_good
                     cell.font = good_font
