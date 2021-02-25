@@ -208,12 +208,11 @@ def _Parse_Nessus(report_path):
                    "synopsis",
                    "solution",
                    "plugin_output"]
-    cred_fail_plugins = ["117886",
-                         "21745",
+    cred_fail_plugins = ["21745",
                          "110385"]
 
     # Open and read the XML report data into the program
-    f = open(report_path, 'r')
+    f = open(report_path, encoding="utf8")
     xml_content = f.read()
     f.close()
 
@@ -519,14 +518,16 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
             diff_indices.append(i)
 
     for row in diff_indices: # iterate over rows (that represent vulnerabilities that do not reappear in the provided scan report) that need to be checked pending modification
-        if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
-            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
-                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
-                if (vuln_analysis_df.iloc[row]['Status'] == 'Pending Remediation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Analysis' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle'):
-                    vuln_analysis_df.loc[(row, 'Status')] = 'Remediated'+' - '+(DATE.strftime('%b'))
-                    vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending, and was not found in the last credentialed check of the host - marked remediated.'
-        if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
-            vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
+        h = report_dict.get(vuln_analysis_df.iloc[row]['Target'], 0)
+        if h != 0:
+            if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
+                if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
+                    vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
+                    if (vuln_analysis_df.iloc[row]['Status'] == 'Pending Remediation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Analysis' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle'):
+                        vuln_analysis_df.loc[(row, 'Status')] = 'Remediated'+' - '+(DATE.strftime('%b'))
+                        vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending, and was not found in the last credentialed check of the host - marked remediated.'
+            if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
+                vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
 
 # Identifies never-before-seen vulnerabilities in the report dataframe and appends them to the spreadsheet dataframe
 def _Add_New_Vulns (vuln_analysis_df, report_df):
@@ -596,6 +597,7 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
     _Backup(spreadsheet)
     wb = load_workbook(spreadsheet, read_only=False)
 
+    #print(client)
     try:
         ws = wb[client]
         print("Target sheet name automatically gathered according to Scan name.")
@@ -635,7 +637,10 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
                     report_df.loc[row, 'MAC(s)'] = report_dict[target]['mac-address']
                 else:
                     report_df.loc[row, 'MAC(s)'] = '???'
-                report_df.loc[row, 'OS'] = report_dict[target]['operating-system']
+                if 'operating-system' in report_dict[target].keys():
+                    report_df.loc[row, 'OS'] = report_dict[target]['operating-system']
+                else:
+                    report_df.loc[row, 'OS'] = '???'
                 report_df.loc[row, 'Port'] = report_dict[target]['vulns'][v]['port']
                 report_df.loc[row, 'Service'] = report_dict[target]['vulns'][v]['svc_name']
                 report_df.loc[row, 'Synopsis'] = report_dict[target]['vulns'][v]['synopsis']
@@ -648,6 +653,8 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
                 report_df.loc[row, 'Solution'] = report_dict[target]['vulns'][v]['solution']
                 report_df.loc[row, 'Vulnerability Details'] = 'https://www.tenable.com/plugins/nessus/' + report_dict[target]['vulns'][v]['pluginID']
                 row+=1
+        #report_df = report_df.astype(str)
+        report_df = report_df.astype({"Vulnerability Name": str, "Device Name": str, "MAC(s)": str})
 
     print("Modifying target analysis sheet with new scan data...")
     _Mod_Analysis_Spreadsheet(vuln_analysis_df, report_df, report_dict) # change the existing spreadsheet's dataframe to reflect new report data
