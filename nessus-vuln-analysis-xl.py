@@ -247,7 +247,21 @@ def _Parse_Nessus(report_path):
                               vuln_dict[param.tag] = param.text
                       vulns_dict[ReportItem.attrib['pluginID']] = vuln_dict
                   props_dict['vulns'] = vulns_dict
-              report_dict[ReportHost.attrib['name']] = props_dict
+              # Determine if current host's MAC address has appeared before (with a different device name) in the current scan. This helps prevent duplicate vulnerabilities when a device has more than one NIC/IP
+              c = 0
+              for h in report_dict:
+                  report_mac = report_dict[h].get('mac-address', 0)
+                  this_mac = props_dict.get('mac-address', 0)
+                  #print(str(report_mac) + ', ' + str(this_mac))
+                  if report_mac != 0 and this_mac != 0:
+                      #print(this_mac)
+                      if report_dict[h]['mac-address'] == props_dict['mac-address']:
+                          print(h)
+                          print(report_dict[h]['host-ip'])
+                          print(props_dict['host-ip'])
+                          c+=1
+              if c == 0: # Only add the current host to the report_dict if they HAVE NOT been seen before in the current scan
+                  report_dict[ReportHost.attrib['name']] = props_dict
 
       # Determine credentialed scan status of each host and create a dictionary key for each
       for host in report_dict:
@@ -494,7 +508,11 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
                     report_indices.append(index)
 
     for row in common_indices: # iterate over rows (that represent vulnerabilities in common with the new report) that need to be checked pending modification
-        if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
+        try:
+            aut = report_dict[vuln_analysis_df.iloc[row]['Target']].get('auth', 0)
+        except:
+            aut = 'error'
+        if aut == 's':
             if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
                 vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
                 if vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle': # change the status of rows needing a reevaluation based on patch cycle
