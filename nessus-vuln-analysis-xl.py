@@ -508,13 +508,18 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
                     report_indices.append(index)
 
     for row in common_indices: # iterate over rows (that represent vulnerabilities in common with the new report) that need to be checked pending modification
-        try:
-            aut = report_dict[vuln_analysis_df.iloc[row]['Target']].get('auth', 0)
-        except:
-            aut = 'error'
+        aut = 0
+        for host in report_dict.keys():
+            try:
+                test = report_dict[host].get('mac-address', 0)
+                if report_dict[host]['mac-address'] == vuln_analysis_df.iloc[row]['MAC(s)']:
+                    aut = report_dict[host].get('auth', 0)
+                    host_key = host
+            except:
+                print(host + " does not have a mac-address key")
         if aut == 's':
-            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
-                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
+            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[host_key]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
+                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[host_key]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
                 if vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle': # change the status of rows needing a reevaluation based on patch cycle
                     vuln_analysis_df.loc[(row, 'Status')] = 'Pending Reevaluation'
                     vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending patch cycle - re-examine vulnerability.'
@@ -536,23 +541,30 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
             diff_indices.append(i)
 
     for row in diff_indices: # iterate over rows (that represent vulnerabilities that do not reappear in the provided scan report) that need to be checked pending modification
-        h = report_dict.get(vuln_analysis_df.iloc[row]['Target'], 0)
-        if h != 0:
-            if report_dict[vuln_analysis_df.iloc[row]['Target']]['auth'] == 's':
-                if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
-                    vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[vuln_analysis_df.iloc[row]['Target']]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
-                    if (vuln_analysis_df.iloc[row]['Status'] == 'Pending Remediation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Analysis' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle'):
-                        vuln_analysis_df.loc[(row, 'Status')] = 'Remediated'+' - '+(DATE.strftime('%b'))
-                        vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending, and was not found in the last credentialed check of the host - marked remediated.'
-            if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
-                vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
+        aut = 0
+        for host in report_dict.keys():
+            try:
+                test = report_dict[host].get('mac-address', 0)
+                if report_dict[host]['mac-address'] == vuln_analysis_df.iloc[row]['MAC(s)']:
+                    aut = report_dict[host].get('auth', 0)
+                    host_key = host
+            except:
+                print(host + " does not have a mac-address key")
+        if aut == 's':
+            if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[host_key]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
+                vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[host_key]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
+                if (vuln_analysis_df.iloc[row]['Status'] == 'Pending Remediation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Ticket Creation' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Analysis' or vuln_analysis_df.iloc[row]['Status'] == 'Pending Patch Cycle'):
+                    vuln_analysis_df.loc[(row, 'Status')] = 'Remediated'+' - '+(DATE.strftime('%b'))
+                    vuln_analysis_df.loc[(row, 'Robot Note')] = 'was pending, and was not found in the last credentialed check of the host - marked remediated.'
+        if vuln_analysis_df.iloc[row]['Status'] == None: # catch any rows with empty Status cells (there should never be rows with empty Status cells)
+            vuln_analysis_df.loc[(row, 'Status')] = 'Pending Analysis'
 
 # Identifies never-before-seen vulnerabilities in the report dataframe and appends them to the spreadsheet dataframe
 def _Add_New_Vulns (vuln_analysis_df, report_df):
-    merged_df = report_df.merge(vuln_analysis_df, how='inner', on = ['Vulnerability Name', 'Device Name', 'MAC(s)'], suffixes=('','_y')) # generate a dataframe with rows that match between the sheet df and the report df
+    merged_df = report_df.merge(vuln_analysis_df, how='inner', on = ['Vulnerability Name', 'MAC(s)'], suffixes=('','_y')) # generate a dataframe with rows that match between the sheet df and the report df
     merged_df.drop(list(merged_df.filter(regex='_y$')), axis=1, inplace=True) # strip away unwanted columns created by the merge
     diff_df = pd.concat([report_df, merged_df], sort=False) # concatenate the report df and the df containg similarities between the sheet df and the report df
-    diff_df2 = diff_df.drop_duplicates(subset=['Vulnerability Name', 'Target', 'MAC(s)'],keep=False) # drop all except unique entries, leaving us only with report df vulnerability/host combos that are totally unique to the report and never appear in the sheet df
+    diff_df2 = diff_df.drop_duplicates(subset=['Vulnerability Name', 'MAC(s)'],keep=False) # drop all except unique entries, leaving us only with report df vulnerability/host combos that are totally unique to the report and never appear in the sheet df
     return vuln_analysis_df.append(diff_df2, ignore_index=True, sort=False) # return the generated final df onto the working sheet df
 
 # Performs all modification of the analysis spreadsheet after analyzing the scan reports
@@ -672,7 +684,7 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
                 report_df.loc[row, 'Vulnerability Details'] = 'https://www.tenable.com/plugins/nessus/' + report_dict[target]['vulns'][v]['pluginID']
                 row+=1
         #report_df = report_df.astype(str)
-        report_df = report_df.astype({"Vulnerability Name": str, "Device Name": str, "MAC(s)": str})
+        report_df = report_df.astype({"Vulnerability Name": str, "MAC(s)": str})
 
     print("Modifying target analysis sheet with new scan data...")
     _Mod_Analysis_Spreadsheet(vuln_analysis_df, report_df, report_dict) # change the existing spreadsheet's dataframe to reflect new report data
