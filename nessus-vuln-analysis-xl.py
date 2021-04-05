@@ -516,7 +516,8 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
                     aut = report_dict[host].get('auth', 0)
                     host_key = host
             except:
-                print(host + " does not have a mac-address key")
+                #print(host + " does not have a mac-address key")
+                continue
         if aut == 's':
             if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[host_key]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
                 vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[host_key]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
@@ -549,7 +550,8 @@ def _Mod_Analysis_Spreadsheet (vuln_analysis_df, report_df, report_dict):
                     aut = report_dict[host].get('auth', 0)
                     host_key = host
             except:
-                print(host + " does not have a mac-address key")
+                #print(host + " does not have a mac-address key")
+                continue
         if aut == 's':
             if datetime.datetime.strptime(vuln_analysis_df.iloc[row]['Last Scanned'], '%a %b %d %H:%M:%S %Y') <= datetime.datetime.strptime(report_dict[host_key]['HOST_START'], '%a %b %d %H:%M:%S %Y'):
                 vuln_analysis_df.loc[(row, 'Last Scanned')] = report_dict[host_key]['HOST_START'] # always change the Last Scanned cell to the report's scan date (as long as the report is, in fact, newer)
@@ -617,6 +619,7 @@ def _2_Feed_New_Reports (nessusfile, spreadsheet, sheet):
     else:
         nessusfile = _Check_Path(nessusfile, 'n')
 
+    print("Now parsing "+nessusfile)
     report_dict, client = _Parse_Nessus(nessusfile) # parse .nessus file for report dict and sheet (client) name
 
     if spreadsheet == '':
