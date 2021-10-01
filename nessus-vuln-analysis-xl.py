@@ -287,7 +287,7 @@ def _Set_Col_Styles (ws):
     for column in ws['B:I']:
         for cell in column:
             cell.style = 'the_rest_style'
-    for column in ws['K:V']:
+    for column in ws['K:W']:
         for cell in column:
             cell.style = 'the_rest_style'
     return ws
@@ -309,33 +309,34 @@ def _Set_Col_Widths (ws):
     ws.column_dimensions['M'].width = 12
     ws.column_dimensions['N'].width = 8
     ws.column_dimensions['O'].width = 10
-    ws.column_dimensions['P'].width = 25
+    ws.column_dimensions['P'].width = 10
     ws.column_dimensions['Q'].width = 25
-    ws.column_dimensions['R'].width = 12
-    ws.column_dimensions['S'].width = 18
+    ws.column_dimensions['R'].width = 25
+    ws.column_dimensions['S'].width = 12
     ws.column_dimensions['T'].width = 18
-    ws.column_dimensions['U'].width = 12
-    ws.column_dimensions['V'].width = 18
+    ws.column_dimensions['U'].width = 18
+    ws.column_dimensions['V'].width = 12
+    ws.column_dimensions['W'].width = 18
     return ws
 
 # Setting cell format based on the row's 'Status' field is needed several times throughout the program's functions
 def _Set_Row_Format (ws):
     for row in ws.iter_rows():
-        if row[18].value == '':
-            row[18].value = 'Pending Analysis'
-        if row[18].value == "Pending Analysis" or row[18].value == "Pending Ticket Creation" or row[18].value == "Pending Reevaluation":
+        if row[19].value == '':
+            row[19].value = 'Pending Analysis'
+        if row[19].value == "Pending Analysis" or row[19].value == "Pending Ticket Creation" or row[19].value == "Pending Reevaluation":
             for cell in row:
                 cell.fill = my_bad
                 cell.font = bad_font
-        elif row[18].value == "Pending Patch Cycle" or row[18].value == "Pending Remediation" or row[18].value == "On Hold":
+        elif row[19].value == "Pending Patch Cycle" or row[19].value == "Pending Remediation" or row[19].value == "On Hold":
             for cell in row:
                 cell.fill = my_neutral
                 cell.font = neutral_font
-        elif re.compile("Remed.*").match(row[18].value) or row[18].value == "Closed":
+        elif re.compile("Remed.*").match(row[19].value) or row[19].value == "Closed":
             for cell in row:
                 cell.fill = my_good
                 cell.font = good_font
-        elif row[18].value == "Risk Ack. Needed" or row[18].value == "False Positive Doc. Needed":
+        elif row[19].value == "Risk Ack. Needed" or row[19].value == "False Positive Doc. Needed":
             for cell in row:
                 cell.fill = my_check
                 cell.font = check_font
@@ -379,6 +380,7 @@ def _Gen_Fresh_Workbook (spreadsheet, sheets):
                               'Analyst',
                               'Severity',
                               'Risk',
+                              'Tier',
                               'Solution',
                               'Notes',
                               'Ticket #',
@@ -401,6 +403,7 @@ def _Gen_Fresh_Workbook (spreadsheet, sheets):
                                 "The security analyst who performed the initial analysis on the vulnerability",
                                 "The scanner's reported severity rating for the vulnerability in question; 4 is critical. 3 is High.",
                                 "The risk level assigned by the security analyst; this ranking, of critical, high, medium, low, or N/A, signifies the practical threat level - not the abstract default threat level given by Nessus; this ranking informs the remediation prioritization schedule",
+                                "The tier of MRW that needs to address the vulnerability: Reactive, Tech Admin, Engineer, or Security.",
                                 "The default solution provided by the scanner plugin.",
                                 "The security analysts notes on the vulnerability; this could be notes on tracking the vulnerability, more insight into why it was detected, or more details about how to remediate it.",
                                 "The ticket number of the ticket created to handle the remediation of the vulnerability",
@@ -481,7 +484,7 @@ def _Gen_Fresh_Workbook (spreadsheet, sheets):
         if sheet in sheets: # check if the current sheet is one of the analysis sheets
             ws1 = wb[sheet] # initialize a worksheet object to apply styles and widths
             ws1.add_data_validation(data_val) # applies data validation to the statuses column so that the program's modification logic doesn't hit any snags
-            data_val.add("S2:S1048576")
+            data_val.add("T2:T1048576")
             ws1 = _Set_Col_Styles(ws1) # iterate over cells in specified columns and apply styles
             ws1 = _Set_Col_Widths(ws1) # set custom column widths
     # finally save and close the fresh worksheet, ready to be fed into the program
@@ -590,7 +593,7 @@ def _Finagle_WB (existing_spreadsheet, wb, vuln_analysis_df, target_sheet):
             if s == sheet:
                 ws2 = wb[s]
                 ws2.add_data_validation(data_val)
-                data_val.add("S2:S1048576") # specifies the column/rows to apply to; the second value means ALL rows under column O
+                data_val.add("T2:T1048576") # specifies the column/rows to apply to; the second value means ALL rows under column O
 
     ws1 = _Set_Col_Widths(ws1) # set adequate column widths for all columns in the working sheet as well as the targets sheet
 
@@ -720,7 +723,7 @@ def _3_Add_New_Sheet (spreadsheet, new_sheet):
     ws1 = wb[new_sheet]
 
     ws1.add_data_validation(data_val) # applies data validation to the statuses column so that the program's modify logic doesn't hit any snags
-    data_val.add('S2:S1048576')
+    data_val.add('T2:T1048576')
     ws1 = _Set_Col_Styles(ws1) # iterate over cells in specified columns and apply styles
     ws1 = _Set_Col_Widths(ws1) # set column widths
     ws1.freeze_panes = "A2" # freeze top row column names
@@ -795,7 +798,7 @@ def _4_Generate_Remed_Report (spreadsheet, sheet, month):
     fn = '\\'.join(spreadsheet.split('\\')[:-1])+'\\'+sheet+' Remediation Report_'+mo.split()[-1]+'.xlsx' # the name of the report file
     rws = report.active
     rws.title = sheet+' Remed. Report'
-    rws.merge_cells('A1:V1')
+    rws.merge_cells('A1:W1')
     rws['A1'] = sheet+' Remediation Report - '+mo.split()[-1]
     report.save(filename = fn)
     report.close()
@@ -834,8 +837,8 @@ def _4_Generate_Remed_Report (spreadsheet, sheet, month):
     wsr.freeze_panes = "A3"
 
     for row in wsr.iter_rows():
-        if row[18].value != None:
-            if re.compile("Remed.*").match(row[18].value):
+        if row[19].value != None:
+            if re.compile("Remed.*").match(row[19].value):
                 for cell in row:
                     cell.fill = my_good
                     cell.font = good_font
@@ -872,7 +875,7 @@ def _5_Migrate_Spreadsheet (spreadsheet):
         ws2 = _Set_Col_Styles(ws2)
 
         ws2.add_data_validation(data_val)
-        data_val.add('S2:S1048576')
+        data_val.add('T2:T1048576')
 
         ws2 = _Set_Row_Format(ws2) # fine-tune formatting (color, border, font, etc.) based on vulnerability status
 
