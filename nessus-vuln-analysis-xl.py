@@ -866,7 +866,7 @@ def _5_Migrate_Spreadsheet (spreadsheet):
         data = ws.values
         columns = next(data)[0:]
         df = pd.DataFrame(data, columns=columns)
-        df2 = df.loc[~((df.Status.str.match('Remed.*')) | (df['Status']=='Closed'))]
+        df2 = df.loc[~((df.Status.str.match('Remed.*')))]
         df2.dropna(axis=0, how='all', inplace=True)
         wb2.remove(wb2[s])
         df2.to_excel(writer, sheet_name=s, index=False, engine='openpyxl')
